@@ -1,0 +1,972 @@
+---
+title: "Joint project"
+output: word_document
+date: "2024-03-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(naniar)
+library(tidyverse)
+library(ggplot2)
+library(visdat)
+library(tidyr)
+library(dplyr)
+
+coral <- read.csv('/users/mehr/desktop/data/coral_whole.csv')
+attach(coral)
+```
+
+## Description of the Data
+
+first od all I get a structure to have an idea about the dataset. 
+```{r cars}
+str(coral)
+summary(coral)
+```
+There is 18 columns and nearly 40000 rows, that seems we have a lot of missing values. 
+first of all i need to know how much missing values we have in the dataset. 
+```{r}
+coral <- coral[!duplicated(coral), ]
+missing_percent <- data.frame(colMeans(is.na(coral)) * 100)
+print(missing_percent)
+```
+based on the data above. we create a plot to see how much missing values we have and compare them. 
+
+
+```{r}
+missing_percent <- data.frame(colMeans(is.na(coral)) * 100)
+colnames(missing_percent)[1] <- "percent"
+
+#missing_percent <- data.frame(column = names(coral), percent = missing_percent)
+missing_percent$column <- names(coral)
+
+percent_plot<-ggplot(missing_percent, aes(x = column, y = percent)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  labs(x = "Columns", y = "Percent Missing", title = "Percent Missing in Each Column")
+percent_plot + geom_text(aes(label = round(percent,2)), vjust = -0.5, color = "black", size = 3)
+
+vis_miss(coral)
+```
+The graph shows that percent cover has nearly 30% of the data missing. in the second place Percent bleaching has nearly 15 % missing value and Depth with less than 5%  has the most missing values.  
+After having a closerr look and study the dataset, i came to this conclusion that although percent cover holds precious data but it is better to remove the column. 
+Percent bleaching with more than 15% missing value, has the most important values in the dataset so i cannot remove that. The Depth column is the same, it is very important and even is less data set 5% so i keep the column and delete the missing rows from the data set. 
+I decided to not impute and fill the data in the Percent Bleaching because it is the target column, so I decided to remove the missing rows. Filling could happen in other columns with the missing rows.
+
+
+```{r}
+
+#coral$Percent_Cover <- NULL
+
+coral<- coral%>% dplyr::select(-Percent_Cover)
+
+```
+Percent_Cover is removed and the next step is removing the missing info from the percent_bleaching the most important column. and fill the rest that are less than 5 % with the median. 
+
+
+```{r}
+coral <- coral %>% drop_na(Percent_Bleaching)
+coral$Bleaching_Level[is.na(coral$Bleaching_Level)] <- "Colony"
+
+
+coral <- coral %>%
+  mutate(Depth_m = replace_na(Depth_m, median(Depth_m, na.rm = TRUE)),
+        Distance_to_Shore = replace_na(Distance_to_Shore, median(Distance_to_Shore, na.rm = TRUE)),
+        Turbidity = replace_na(Turbidity, median(Turbidity, na.rm = TRUE)),
+        ClimSST = replace_na(ClimSST, median(ClimSST, na.rm = TRUE)),
+        Temperature_Maximum = replace_na(Temperature_Maximum, median(Temperature_Maximum, na.rm = TRUE)),
+        Temperature_Mean = replace_na(Temperature_Mean, median(Temperature_Mean, na.rm = TRUE)),
+        SSTA = replace_na(SSTA, median(SSTA, na.rm = TRUE)),
+        TSA = replace_na(TSA, median(TSA, na.rm = TRUE)),
+                 )
+
+coral=drop_na(coral)
+vis_miss(coral)
+
+missing_percent <- data.frame(colMeans(is.na.data.frame(coral)) * 100)
+print(missing_percent)
+coral['Ocean_Name'][coral['Ocean_Name'] == 'Arabian Gulf'] <- 'Persian Gulf'
+
+```
+
+As the graph above shows we have no missing values in the dataset. 
+
+Now we ned to see what wecan do with the outliers and skewness. 
+```{r}
+column_names<- names(coral)
+print(column_names)
+
+```
+we need to explore to see if we have outliers and then what we can do about them. to do that I wrote a function to do that just by giveing it the column name.
+
+```{r}
+plot_distributions <- function(data, column_name) {
+  
+  #Boxplot
+  boxplot_figure <- ggplot(data, aes(x = factor(1), y = .data[[column_name]])) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", column_name), x = "", y = column_name) +
+    theme_minimal()
+  print(boxplot_figure)
+  
+  #  histogram
+  histogram_figure <- ggplot(data, aes(x = .data[[column_name]])) +
+    geom_histogram(bins=15, fill = "blue", color = "black") + # Adjust binwidth as needed
+    labs(title = paste("Histogram of", column_name), x = column_name, y = "Frequency") +
+    theme_minimal()
+  print(histogram_figure)
+
+    #qqplot_figure <-
+      ggplot(data, aes(sample = .data[[column_name]])) +
+   stat_qq() +
+   stat_qq_line() +
+   labs(title = paste("QQ Plot of ", column_name)) +
+    theme_minimal()
+  
+  #print(qqplot_figure)
+}
+```
+
+## Outliers
+
+```{r}
+outliers_percentage <- function(x) {
+  if (is.numeric(x)) {
+    q <- quantile(x, probs=c(.25, .75), na.rm = TRUE)
+    iqr <- IQR(x, na.rm = TRUE)
+    return(sum(x < (q[1] - 1.5 * iqr) | x > (q[2] + 1.5 * iqr), na.rm = TRUE) / length(x) * 100)
+  } else {
+    return("No Outlier found!")
+  }
+}
+
+percent_outliers_df <- function(df) {
+  sapply(df, outliers_percentage)
+}
+
+# Use the function on a dataframe
+columns=c("columns","percentage")
+outlier_percent <- data.frame(names=names(coral),percent_outliers_df(coral))
+print(outlier_percent)
+```
+
+based on the results above ClimSST has the most outliers. with 17.6 percent.
+
+## Plots
+
+```{r}
+ggplot(coral, aes(x = Ocean_Name, y = ClimSST, fill = Ocean_Name)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "ClimSST by Ocean Name", x = "Ocean Name", y = "ClimSST")
+
+```
+
+```{r}
+ggplot(coral, aes(x = Ocean_Name, y = Percent_Bleaching, fill = Ocean_Name)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Bleaching by Ocean Name", x = "Ocean Name", y = "Bleaching")
+```
+Atlantic ocean has the most report for the bleaching then Indian ocean. 
+```{r}
+#ggplot(coral, aes(x =Bleaching_Level, y = Percent_Bleaching,fill=Ocean_Name)) +
+#  geom_bar(stat = "identity",width = 0.5) +
+#  theme_minimal() +
+#  labs(title = "Bleaching level by bleaching percent", x = "Bleaching_Level", y = #"Bleaching_Percent")
+
+
+
+ggplot(coral, aes(x =Bleaching_Level,fill=Ocean_Name)) +
+  geom_bar(stat = "count",width = 0.5) +
+  theme_minimal() +
+  labs(title = "Bleaching level count plot", x = "Bleaching_Level", y = "count")
+
+```
+Population has nearly 2 times more report of bleaching than population. It shows the scope of the impact of the bleaching. In colony level of bleaching Atlantic and pacific oceans have the most reports of bleached corals.
+
+```{r}
+ggplot(coral, aes(x = Percent_Bleaching, y = Temperature_Maximum,color=Realm_Name)) +
+  geom_point(alpha=.4) +
+  theme_minimal() +
+  labs(title = "Bleaching percent by Temperature Maximum", x ="Bleaching_Percent", y =  "Temperature_Maximum")
+
+hist(coral$Temperature_Maximum)
+hist(coral$Percent_Bleaching)
+```
+The range of 304 to 306 includes the majority of the bleaching. And the majority of the bleached coral, are located in the Tropical Atlantic. 
+
+```{r}
+
+ggplot(coral, aes(x = Turbidity)) +
+  geom_histogram(fill = "steelblue", alpha = 0.7,bins = 15) +
+  theme_minimal() +
+  labs(title = "Histogram of Turbidity", x = "Turbidity", y = "Frequency")
+
+ggplot(coral, aes(x = Percent_Bleaching, y = Turbidity,color=Exposure)) +
+  geom_point(alpha=.4) +
+  theme_minimal() +
+  labs(title = "Bleaching percent by Turbidity", x ="Bleaching_Percent", y =  "Turbidity")
+
+
+```
+
+```{r}
+
+coral%>%
+  dplyr::select(Cyclone_Frequency,Date_Year)%>%
+  group_by(Date_Year)%>%
+  mutate(Cyclone_Frequency=mean(Cyclone_Frequency))%>%
+  
+ggplot( aes(x=Date_Year, y=Cyclone_Frequency)) +
+  geom_line() + 
+  labs(title = "Cyclone by Year", x = "Year", y = "Cyclone") +
+  theme_minimal()
+```
+
+In this plot Cyclones are decreasing after 2015. We see a fluctuation in Cyclones before 2005 but after that it gets more stable and then shows a bit decreasing. 
+
+```{r}
+coral%>%
+dplyr::select(Percent_Bleaching,Date_Year)%>%
+group_by(Date_Year)%>%
+mutate(Percent_Bleaching=mean(Percent_Bleaching))%>%
+  
+ggplot( aes(x=Date_Year, y=Percent_Bleaching)) +
+  geom_line() + 
+  labs(title = "Bleaching by Year", x = "Year", y = "Bleaching") +
+  theme_minimal()
+
+
+coral%>%
+  dplyr::select(Percent_Bleaching,Date_Year)%>%
+  group_by(Date_Year)%>%
+  summarise(Percent_Bleaching=n())%>%
+  
+ggplot( aes(x=Date_Year, y=Percent_Bleaching)) +
+  geom_line() + 
+  labs(title = "The Frequency of Bleaching Reports by Year", x = "Year", y = "The frequency of Bleaching") +
+  theme_minimal()
+
+
+coral%>%
+  dplyr::select(Percent_Bleaching,Date_Year)%>%
+  #group_by(Date_Year)%>%
+  filter(Date_Year>2000)%>%
+  summarise(Percent_Bleaching=n())
+
+```
+This plot indicates a huge decrease in cbleaching over time, from 1980 to 2020. if we consider last 20 years the fluctuation is much less than the early years of the study, and obviously one of the reasons could be because we have more reports in the last 10 or 20 years. Almost all the reports and data were gathered after 2000.
+
+
+```{r}
+coral%>%
+dplyr::select(Temperature_Mean,Date_Year)%>%
+group_by(Date_Year)%>%
+mutate(Temperature_Mean=mean(Temperature_Mean))%>%
+  
+ggplot( aes(x=Date_Year, y=Temperature_Mean)) +
+  geom_line() + 
+  labs(title = "Temperature_Mean by Year", x = "Year", y = "Temperature_Mean") +
+  theme_minimal()
+```
+
+Since 2000, we see 1 degree of warming in the mean temperature of sea water. 
+
+```{r} 
+#function for ploting
+coral_plot <- function(data, column1, column2, y_label,x_label) {
+  data %>%
+    dplyr::select({{ column1 }}, {{ column2 }}) %>%
+    group_by({{ column2 }}) %>%
+    summarise(mean_column1 = mean({{ column1 }}, na.rm = TRUE)) %>%
+    ggplot(aes(x = {{ column2 }}, y = mean_column1)) +
+    geom_line() +
+    labs(title = paste(x_label, "by", y_label),
+         x = x_label, y = y_label) +
+    theme_minimal()
+}
+coral_plot(coral,SSTA,Date_Year,"Sea Surface Temperature Anomaly","Year")
+```
+Based on the plot from 2000 to 2020 in average +0.5 degree. 
+
+```{r}
+coral_plot(coral,Turbidity,Date_Year,"Turbidity","Year")
+```
+Turbidity is not changing too much from 2000 to 2018 and then we see a big drop, that i think is not.But in total we can say turbidity increased 0.5. 
+
+```{r}
+ggplot(coral,aes(x=Temperature_Maximum,y=SSTA,color=Percent_Bleaching))+geom_point()
+```
+There is no specific relationship between SSTA and Percent_Bleaching but coloring shows around 306 degree of Maximum Temperature and 0 to 20 SSTA we have the most Bleaching reports. And with increasing the temperature bleaching is not increasing, rather decreasing.
+
+```{r}
+ggplot(coral,aes(x=Realm_Name,y=Percent_Bleaching))+
+  geom_bar(stat='identity')+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = .4))
+
+
+coral_summary <- coral %>%
+  group_by(Exposure) %>%
+  summarise(Mean_Percent_Bleaching = mean(Percent_Bleaching))
+ggplot(coral_summary, aes(x=Exposure, y=Mean_Percent_Bleaching)) +
+  geom_bar(stat='identity')
+
+```
+In the plots above, Bleaching percent is the highest in the tropical Atlantic and central Indo-Pacific. Those corals which "Sometimes" faced with the sea currents have more bleaching than those sheltered or Exposed. 
+
+```{r}
+ggplot(coral,aes(x=as.factor(Bleaching_Level),y=Percent_Bleaching^(1/6)))+
+  geom_boxplot()
+```
+I used a transformer here, in the population level of bleaching the median is close to zero on the other hand, the median in the colony level is around 10. Colonies are much more prone to bleach. 
+
+```{r}
+coral %>%
+  count(Country_Name) %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  ggplot(aes(y = reorder(Country_Name, n), x = n)) +
+  geom_bar(stat = 'identity') 
+```
+This plot indicates top10 countries with the highest bleaching reports. Malyasia and USA with more than 4000 report each, are in the top list. 
+
+
+## Descriptive Statistics
+
+```{r}
+summary(coral)
+```
+
+Cyclone_frequency has the median 51.4 and mean 52.3 the mean and median are close to each other we can say Cyclone is normally distributed around 52.  
+```{r}
+hist(Cyclone_Frequency)
+```
+The shape of the histogram shows a right skewed normal dist. with minimum 0 and max 50. 
+
+
+```{r}
+#boxplot()
+hist(Depth_m,breaks=50)
+ggplot(coral, aes(sample = Depth_m)) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot") +
+  theme_minimal()
+
+ggplot(coral, aes(sample = (Depth_m)^(1/2.5))) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot with transformer") +
+  theme_minimal()
+```
+mean and median on the Depth variable are close to each other that shows it is close to normal distribution with the mean 7 and median 6.the transformer iused for this variable is Depth_m^(1/2.5). 
+
+
+```{r}
+hist(ClimSST,breaks=50)
+ggplot(coral, aes(sample = ClimSST)) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot") +
+  theme_minimal()
+
+hist(log(ClimSST),breaks=50)
+
+
+
+
+```
+It seems in ClimSST we have a left skewed distribution with outliers. And the plot after using the transformer still not normal. i investigated the data that's clear why there is more than 5000 times 262.15 in the ClimSST. I couldn't find any pattern to explain that.
+
+```{r}
+ocean_table<-table(coral$Ocean_Name)
+summary(coral$Ocean_Name)
+ocean_table
+barplot(ocean_table,main = "the oceans")
+
+
+```
+We know from prvious plots that the USA and Malaysia have the most reports of research that's the reason that we have a big frequency in Pacific and Atlantic oceans. Persian Gulf has the least frequency.
+
+```{r}
+hist(Distance_to_Shore,breaks=100)
+ggplot(coral, aes(sample = Distance_to_Shore)) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot") +
+  theme_minimal()
+
+ggplot(coral, aes(sample = log(Distance_to_Shore))) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot with transformer") +
+  theme_minimal()
+
+hist(log(Distance_to_Shore),main = "histogram after transformer log()")
+```
+
+minimum distance to shore is 3 meters and the max is 300 kilometers. The median is 476 and he mean 3671 and the distribution is right skewed.there's is a big difference between mean and median that's why that is right skewed.
+
+```{r}
+table_exposure<-table(coral$Exposure)
+barplot(table_exposure)
+```
+We have three category in the Exposure group. Sheltered corals have the most reports of the study. 
+```{r}
+table_level<-table(coral$Bleaching_Level)
+barplot(table_level)
+```
+The bleaching level column is category. Column has two groups Colony and Population. and population is twice as much as the colony.
+
+```{r}
+summary(coral$SSTA)
+hist(coral$SSTA,breaks=100)
+ggplot(coral, aes(sample = SSTA)) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot") +
+  theme_minimal()
+
+```
+The mean and Median in SSTA are almost equal .27 and .28 with the min and max -4.2 and 5.9. The the distribution is normal with some outliers at two tails.
+
+```{r}
+summary(coral$TSA)
+hist(coral$TSA,breaks=200)
+ggplot(coral, aes(sample = TSA)) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot") +
+  theme_minimal()
+
+```
+with median and mean around -0.71, -0.96 they are nearly close and based on the plots it seems it is right skewed.
+
+```{r}
+summary(coral$Percent_Bleaching)
+hist(coral$Percent_Bleaching,breaks=25)
+ggplot(coral, aes(sample = Percent_Bleaching)) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot") +
+  theme_minimal()
+
+ggplot(coral, aes(sample =log (Percent_Bleaching+1))) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot with transformer") +
+  theme_minimal()
+
+hist(log(coral$Percent_Bleaching+1),main = "histogram after transformer")
+
+#The percentage of the 0s in the Bleaching column
+
+#nrow(subset(coral, Percent_Bleaching==0))*100/nrow(coral)
+
+#Removing the outliers
+#q1 <- quantile(coral$Percent_Bleaching, 0.25, na.rm = TRUE)
+#q3 <- quantile(coral$Percent_Bleaching, 0.75, na.rm = TRUE)
+#iqr <- q3 - q1
+
+# Identify the outliers
+#outliers <- coral$Percent_Bleaching < (q1 - 1.5 * iqr) | coral$Percent_Bleaching > #(q3 + 1.5 * iqr)
+
+# Remove the outliers
+#coral_clean_of_outliers <- coral[!outliers, ]
+
+#plotting after removing outliers
+#hist(coral_clean_of_outliers$Percent_Bleaching,breaks=25)
+#ggplot(coral_clean_of_outliers, aes(sample = Percent_Bleaching)) +
+#  geom_qq() +
+#  geom_qq_line()+
+#  ggtitle('QQplot') +
+#  theme_minimal()
+
+#hist(log(coral_clean_of_outliers$Percent_Bleaching),main = 'histogram after transformer')
+
+#nrow(coral)-nrow(coral_clean_of_outliers)
+
+#nrow(subset(coral_clean_of_outliers, Percent_Bleaching==0))*100/nrow(coral_clean_of_outliers)
+
+```
+Percent Bleaching is a key and important variable in the study that shows the amount of the bleaching in every report. It seems, it is highly right skewed. 48 percent of the columns is 0, which is nearly half of the data. I added 1 to the Percent_Bleaching as a transformer and used the log() on it to see the distribution. the distribution is not normal. and it is not just right skewed distribution. 
+
+```{r}
+summary(coral$Temperature_Mean)
+hist(coral$Temperature_Mean,breaks=25)
+ggplot(coral, aes(sample = Temperature_Mean)) +
+  geom_qq() +
+  geom_qq_line()+
+  ggtitle("QQplot") +
+  theme_minimal()
+
+```
+Temperature mean in the left tail has some outliers and mean and median are almost the same. and it is the normal distribution. 
+
+```{r}
+
+ggplot(coral, aes(x = Realm_Name)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  xlab("Realm Name")
+```
+there are 8 realm_Name categories, Central Indo-Pacific and Tropical Atlantic are the highest proportion. 
+
+
+## Hypothesis Test
+
+# One Sample
+For the one-sample test I want to test if mean cyclone frequency is 50.
+
+H0: the mean cyclone frequency is 50 , mu=50
+H1: the mean is not 50,               mu!=50
+
+```{r}
+
+boxplot(coral$Cyclone_Frequency)
+
+hist(coral$Cyclone_Frequency)
+# I had this code but as far as i found out that the nirmal 
+#mu <- 50 
+#n  <- nrow(coral)
+#sd<-sd(coral$Cyclone_Frequency)
+#cyclone_frequency_mean <- mean(coral$Cyclone_Frequency)
+#test_stat <- (cyclone_frequency_mean-mu)/(sd/sqrt(n))
+
+#p_value_one_sample <- (1-pnorm(test_stat))*2
+#p_value_one_sample
+
+# using the t.test()
+#one_sample_test_cyclone<-t.test(coral$Cyclone_Frequency,mu=50,alternative = "two.sided")
+#one_sample_test_cyclone
+
+# Bootstrapping
+
+mean_hat=c()
+for(i in 1:1000) {
+  boot_samp = sample(coral$Cyclone_Frequency, length(coral$Cyclone_Frequency), replace = TRUE)
+  mean_hat[i] = mean(boot_samp)
+}
+hist(mean_hat)
+mean(mean_hat)
+median(mean_hat)
+sd(mean_hat)
+
+quantile(mean_hat,c(0.025,0.975))
+
+2*pnorm(50,mean(mean_hat),sd(mean_hat))
+```
+95% CI is 52.24877 and 52.39952.
+the null hyp 50 is not within the 95% CI, we reject the null hypothesis.
+The pvalue for this test is calculated and less than 0.05.
+
+#One Sample -2
+I am going to check the one sample hypothesis on TSA.
+
+H0: the mean TSA is 0 
+H1: the mean is not 0
+
+```{r}
+hist(coral$TSA)
+boxplot((coral$TSA)^(1/4))
+one_sample_test_TSA<-t.test(coral$TSA,mu=0,alternative = "two.sided")
+one_sample_test_TSA
+
+
+
+mean_hat_TSA=c()
+for(i in 1:1000) {
+  boot_samp = sample(coral$TSA, length(coral$TSA), replace = TRUE)
+  mean_hat_TSA[i] = mean(boot_samp)
+}
+#hist(mean_hat_TSA,breaks = 30)
+boxplot(mean_hat_TSA)
+print(paste("mean: ", mean(mean_hat_TSA)))
+print(paste("median: ", median(mean_hat_TSA)))
+
+sd(mean_hat_TSA)
+
+print(paste("Quantile : ", quantile(mean_hat_TSA,c(0.025,0.975))))
+2*pnorm(50,mean(mean_hat_TSA),sd(mean_hat_TSA))
+```
+pvalue in both ways bootstraping and the normal way even with non-normal dist  is less than .05 then we can reject the null hypothesis and we can conclude that the mean TSA is not zero. the confidence interval is between -0.9778226, -0.9431075. and the mean is -0.960465.
+
+
+# Two sample
+Two sample hypothesis, of SSTA by bleaching levels that are two categories of population and colony. 
+
+H0: The means of the population and colony are equal  mu.population=mu.coloy :
+mu.population- mu.colony=0 
+
+H1: The means are not equal.   mu.population- mu.colony != 0 
+```{r}
+
+#boxplot(coral$SSTA~coral$Bleaching_Level)
+
+ggplot(coral, aes(x = SSTA, fill = Bleaching_Level)) +
+  geom_histogram(alpha = 0.5)+ 
+  labs(title = "Histogram of SSTA by ",
+       x = "Bleaching_Level",
+       y = "Frequency") +
+  theme_minimal()
+
+boxplot(coral$SSTA~coral$Bleaching_Level)
+```
+we are not happy about normality for both categories. it seems a normal distribution but  there are a lot of outliers. so I used the bootstrapping. 
+
+```{r}
+SSTA_population<-coral$SSTA[coral$Bleaching_Level=="Population"]
+SSTA_colony<-coral$SSTA[coral$Bleaching_Level=="Colony"]
+boxplot(coral$SSTA~coral$Bleaching_Level)
+hist(SSTA_population)
+hist(SSTA_colony)
+```
+We have two normal distribution but there are a lot of outliers. 
+
+```{r}
+xbarstar_2sample=c()
+for(i in 1:1000) {
+  boot_samp1 = sample(SSTA_population, length(SSTA_population), replace = TRUE)
+  boot_samp2 = sample(SSTA_colony, length(SSTA_colony),
+                      replace = TRUE)
+  
+  xbarstar_2sample[i] = mean(boot_samp1,na.rm=TRUE)-
+    mean(boot_samp2,na.rm=TRUE)
+}
+hist(xbarstar_2sample)
+boxplot(xbarstar_2sample)
+print(paste("the mean difference: ",mean(xbarstar_2sample)))
+
+print(paste("the difference median: ",median(xbarstar_2sample)))
+print(paste("the difference Standard Error: ",sd(xbarstar_2sample)))
+
+print(paste("Confidence Interval: ",quantile(xbarstar_2sample,c(0.025,0.975))))
+
+#two_sample_test_SSTA_bleachingLevel <- t.test(coral$SSTA~coral$Bleaching_Level,alternative = "two.sided")
+#two_sample_test_SSTA_bleachingLevel
+
+```
+95% CI is between -0.09868988 -0.06054997 and doesn't contains the null hypothesis (0), so 
+we reject the null hypothesis. We conclude there is not a meaningful difference between the SSTA by population or colony level of bleaching.
+
+
+# Two sample -2 
+
+testing the mean of cyclone frequency in two following years 2018-2019.
+H0: the mean of Cyclone frequency is the same in 2018 and 2019
+H0: mu2019  = mu2018 : mu2019 - mu2018 =0
+H1: mu2019 != mu2018 : mu2019 - mu2018!=0
+```{r}
+coral_2019<- coral%>%
+  dplyr::select(Cyclone_Frequency,Date_Year)%>%
+  filter(Date_Year==2019)
+
+coral_2018<- coral%>%
+  dplyr::select(Cyclone_Frequency,Date_Year)%>%
+  filter(Date_Year==2018)
+
+hist(coral_2019$Cyclone_Frequency)
+hist(coral_2018$Cyclone_Frequency)
+boxplot(coral_2019$Cyclone_Frequency,coral_2018$Cyclone_Frequency)
+t.test(coral_2019$Cyclone_Frequency,coral_2018$Cyclone_Frequency,alternative = "two.sided")
+
+
+# Bootstraping
+
+cyclone_boot=c()
+for (i in 1:1000){
+  boot_2019=sample(coral_2019$Cyclone_Frequency,length(coral_2019$Cyclone_Frequency), replace=TRUE)
+  boot_2018=sample(coral_2018$Cyclone_Frequency,length(coral_2019$Cyclone_Frequency), replace=TRUE)
+  cyclone_boot[i]=mean(boot_2019,na.rm=TRUE)-mean(boot_2018,na.rm=TRUE)
+}
+
+
+hist(cyclone_boot)
+boxplot(cyclone_boot)
+print(paste("the mean difference: ",mean(cyclone_boot)))
+
+print(paste("the difference median: ",median(cyclone_boot)))
+print(paste("the difference Standard Error: ",sd(cyclone_boot)))
+
+print(paste("Confidence Interval: ",quantile(cyclone_boot,c(0.025,0.975))))
+
+```
+the spread seems similar. and the histogram shows normal distribution for them. we have numerous outliers, I did the test with th outliers then tried bootstrapping, confidence interval almost didn't change. I conclude that the outliers do not impact the test.
+
+the pvalue is less than 0.05 so we reject the null hypothesis and conclude the means are not equal. and the means are : 49.76035, 51.11950.
+
+
+
+#ANOVA test.
+
+testing the mean of SSTA over the different oceans and sees.
+
+H0: the mean SSTA in all the groups and oceans are equal
+H1: the mean at least in one of them is not equal.
+```{r}
+ggplot(coral, aes(x=Ocean_Name, y=SSTA)) +
+  geom_boxplot()
+
+
+aov_ssta<-aov(SSTA~Ocean_Name,data = coral)
+summary(aov_ssta)
+#boxplot(coral$SSTA~coral$Ocean_Name,ylab = "SSTA", xlab = "Ocean")
+```
+the spread is similar but we have a lot of outliers so I use bootstrapping to do the anova test.
+```{r}
+
+SSTA_Atlantic<-coral$SSTA[coral$Ocean_Name=="Atlantic"]
+SSTA_Pacific<-coral$SSTA[coral$Ocean_Name=="Pacific"]
+SSTA_Indian<-coral$SSTA[coral$Ocean_Name=="Indian"]
+SSTA_Persian<-coral$SSTA[coral$Ocean_Name=="Persian Gulf"]
+SSTA_Red<-coral$SSTA[coral$Ocean_Name=="Red Sea"]
+
+fstat<-c()
+for(i in 1:1000){
+  groupA = sample(SSTA_Atlantic, size=length(SSTA_Atlantic), replace=T)
+  groupB = sample(SSTA_Pacific, size=length(SSTA_Pacific), replace=T)
+  groupC = sample(SSTA_Indian, size=length(SSTA_Indian), replace=T)
+  groupD = sample(SSTA_Persian, size=length(SSTA_Persian), replace=T)
+  groupE = sample(SSTA_Red, size=length(SSTA_Red), replace=T)
+  
+  data_boot<-c(groupA,groupB,groupC,groupD,groupE)
+  simdata = data.frame(data_boot,Ocean_Name=sort(coral$Ocean_Name))
+  fstat[i]<-summary(aov(data_boot~Ocean_Name, data=simdata))[[1]]$F[1]
+}
+
+hist(fstat)
+freal2<-summary(aov(coral$SSTA~coral$Ocean_Name))[[1]]$F[1]
+#is the p-value:
+print(paste("The p-value is:",mean(fstat>=freal2)))
+
+```
+The pvalue were checked without dealing with outliers and then bootstrapping were applied to get the result.
+0.25 > 0.05 so we fail to reject the null hypothesis. That means at least one group has a different mean of SSTA between oceans and seas. 
+
+
+# Anova Test - 2
+I would test if the temperature is the same from 2010 to 2020
+
+H0: the mean temperature in years 2010 to 2019 are the same.
+H1: the mean temprature is not equal from 2010 to 2019
+```{r}
+
+coral_date<-coral%>%
+    filter(Date_Year>=2010 & Date_Year<=2019)
+
+temp_2010<-coral_date$Temperature_Mean[coral_date$Date_Year==2010]
+temp_2011<-coral_date$Temperature_Mean[coral_date$Date_Year==2011]
+temp_2012<-coral_date$Temperature_Mean[coral_date$Date_Year==2012]
+temp_2013<-coral_date$Temperature_Mean[coral_date$Date_Year==2013]
+temp_2014<-coral_date$Temperature_Mean[coral_date$Date_Year==2014]
+temp_2015<-coral_date$Temperature_Mean[coral_date$Date_Year==2015]
+temp_2016<-coral_date$Temperature_Mean[coral_date$Date_Year==2016]
+temp_2017<-coral_date$Temperature_Mean[coral_date$Date_Year==2017]
+temp_2018<-coral_date$Temperature_Mean[coral_date$Date_Year==2018]
+temp_2019<-coral_date$Temperature_Mean[coral_date$Date_Year==2019]
+
+fstat<-c()
+for(i in 1:1000){
+  group2010 = sample(temp_2010, size=length(temp_2010), replace=T)
+  group2011 = sample(temp_2011, size=length(temp_2011), replace=T)
+  group2012 = sample(temp_2012, size=length(temp_2012), replace=T)
+  group2013 = sample(temp_2013, size=length(temp_2013), replace=T)
+  group2014 = sample(temp_2014, size=length(temp_2014), replace=T)
+  group2015 = sample(temp_2015, size=length(temp_2015), replace=T)
+  group2016 = sample(temp_2016, size=length(temp_2016), replace=T)
+  group2017 = sample(temp_2017, size=length(temp_2017), replace=T)
+  group2018 = sample(temp_2018, size=length(temp_2018), replace=T)
+  group2019 = sample(temp_2019, size=length(temp_2019), replace=T)
+
+  
+  data_boot<-c(group2010,group2011,group2012,group2013,group2014,group2015,group2016,group2017,group2018,group2019)
+  
+  simdata = data.frame(data_boot,Date_sorted=sort(coral_date$Date_Year))
+  fstat[i]<-summary(aov(data_boot~Date_sorted, data=simdata))[[1]]$F[1]
+}
+
+hist(fstat)
+freal2<-summary(aov(coral_date$Temperature_Mean~coral_date$Date_Year))[[1]]$F[1]
+#is the p-value:
+print(paste("The p-value is:",mean(fstat>=freal2)))
+
+```
+We reject the null hypothesis 0.503 > 0.05 and conclude that the mean temperature is not the same from 2010 to 2019
+
+
+# Chisq Test
+testing of to see if the oceans and Exposure's of the corals are independent of each other.
+H0: Oceans and exposures are independent of each other
+H1: Oceans and exposures are not independent of each other
+```{r}
+ocean_exposure_table<-table(coral$Ocean_Name, coral$Exposure)
+chi_ocean_exposure<-chisq.test(ocean_exposure_table)
+
+chi_ocean_exposure$expected
+```
+the expected values are greater that 5 so the assumption are met.
+```{r}
+chi_ocean_exposure
+```
+pvalue is less than .05 so we reject the null hypothesis and conclude that the ocean and the exposure are dependent of each other. in other word they associate to each other.
+
+
+
+# Regression
+To check the linear relationship between variables in the coral data set we have to do the correlation test to see if we have any kind of linear relationship. 
+```{r}
+coral %>% select(where(is.numeric))%>%pairs()
+
+# a few examples
+plot(coral$Turbidity,coral$Depth_m)
+
+plot(coral$Temperature_Mean , coral$Cyclone_Frequency)
+
+plot(coral$Temperature_Mean, coral$TSA)
+
+plot(coral$Cyclone_Frequency, coral$Percent_Bleaching)
+
+plot(coral$Cyclone_Frequency, coral$Temperature_Maximum)
+
+plot(coral$Temperature_Mean,coral$TSA)
+
+plot(coral$TSA , coral$Turbidity)
+
+
+
+ClimSST_outlier_free <- coral %>% filter(ClimSST != 262.15)
+ClimSST_outlier_free <- coral[sapply(ClimSST_outlier_free, is.numeric)]
+
+pairs(ClimSST_outlier_free)
+
+#========= check the linearity
+
+```
+From the plots above i chose the TSA and ClimSST to do the regression test.
+first i do the regression test without taking care and dealing with outliers. 
+
+
+H0: Slope=0
+H1: slope!=0
+
+```{r}
+
+boxplot(coral$TSA)
+hist(coral$TSA)
+
+```
+
+We have a normal dist in TSA with a lot of outliers. So we do a linear regression first to see what we get. 
+
+we do the correlation test to see how is the linear reationship between the variables. p=0
+H0: there no linear relationship between  TSA and ClimSST.   p!=0
+
+```{r}
+cor.test(coral$TSA,coral$ClimSST, method = "pearson")
+```
+pvalue <.05 and we reject the null hypothesis. That means the there is a linear relationship between two variables. Now i can do the regression test to see if there is a slope. 
+
+
+```{r}
+reg_result<-lm(TSA~ClimSST, data = coral)
+summary(reg_result)
+
+```
+no I remove the outliers on ClimSST because it's obvious that there wasa problem with one of the entries.
+```{r}
+
+ClimSST_outlier_free <- coral %>% filter(ClimSST != 262.15)
+boxplot(ClimSST_outlier_free$ClimSST)
+hist(ClimSST_outlier_free$ClimSST)
+
+```
+I removed most part of the mistake data in ClimSST and saves in in new variable. If i imputed the mistake variable , 17% of a specific data, median or mean would make bias so i removed them. 
+```{r}
+ClimSST_outlier_free <- coral %>% filter(ClimSST != 262.15)
+
+data<-ClimSST_outlier_free
+BootstrapSLR<-function(data, mod_formula, rep){
+  coef_table<-c()
+  for(i in 1:rep){
+    data_boot<-data[sample(1:nrow(data),
+                           size=nrow(data),replace=T),]
+    lm_boot<-lm(mod_formula,data=data_boot)
+    coef_table<-rbind(coef_table,coef(lm_boot))
+  }
+  coef_table
+}
+
+mod_formula<- formula (TSA ~ ClimSST)
+lm_coral_500<-BootstrapSLR(ClimSST_outlier_free,mod_formula,500)
+hist(lm_coral_500[,1])
+boxplot(lm_coral_500[,1])
+hist(lm_coral_500[,2])
+boxplot(lm_coral_500[,2])
+
+t(apply(lm_coral_500,2,quantile,probs=c(0.025,0.975)))
+
+quantile(lm_coral_500[,1],c(0.025,0.975))#95% CI for intercept
+quantile(lm_coral_500[,2],c(0.025,0.975))#95% CI for slope
+
+
+lm_coral_5000<-BootstrapSLR(ClimSST_outlier_free,mod_formula,5000)
+hist(lm_coral_5000[,1])
+hist(lm_coral_5000[,2])
+print(paste("The mean is :",mean(lm_coral_5000[,2])))
+t(apply(lm_coral_5000,2,quantile,probs=c(0.025,0.975)))
+
+apply(lm_coral_500,2,mean)
+
+apply(lm_coral_5000,2,mean)
+
+TSA_res= -151.999254 + 0.501952 * ClimSST_outlier_free$ClimSST
+```
+
+Average stopping distance will increase by 0.501952 degree for every one unit ClimSST
+
+H0: slope = 0, i.e. no linear relationship between TSA and ClimSST
+
+95% CI for slope is (0.4893382 , 0.5147673 ) doesn't contain the null (0), so
+we reject H0. And conclude there is significant linear relationship between dist and speed.
+
+```{r}
+multiplehistograms<-function(X){
+  for(i in 1:ncol(X)){
+    hist(X[,i],main=colnames(X)[i],xlab=colnames(X)[i])
+  }
+}
+par(mfrow=c(2,1))
+multiplehistograms(lm_coral_5000)
+multiplehistograms(lm_coral_500)
+
+apply(lm_coral_500,2,mean)
+
+apply(lm_coral_5000,2,mean)
+
+fit<- -151.999254 + 0.501952 * ClimSST_outlier_free$ClimSST
+res<-ClimSST_outlier_free$TSA-fit
+dev.off()
+plot(fit,res,ylab="Residuals from bootstrap", xlab="Fitted values from bootstrap")
+qqnorm(scale(res))
+```
+based on the intercept and slope we gt the formula gets a regression formula. the result of the regression ,the spread of residuals on fitted values seems normal. the qqplot shows a bit distanced from the diagonal line but seems alright.
+when compare with the primary formula and regression test and compare it with the resul after bootstrapping there is not much difference between them. 
+
+As earleir mentioned 17% o the data were input wrongly. So based on the result of the regression we can fill them based on the new formula. 
+
+```{r}
+climsst_outlier <- coral %>% filter(ClimSST == 262.15)
+
+climsst_outlier$ClimSST <- (climsst_outlier$TSA + 151.999254) / 0.501952
+
+coral$ClimSST[coral$ClimSST == 262.15] <- climsst_outlier$ClimSST
+
+ggplot(coral, aes(ClimSST)) + geom_histogram(bins = 30)
+
+```
+
+I imputed the data that was mistake and outlier in ClimSST based on the regression line and the result i got from the bootstrapped regression. and t the end we have a normal distribution for ClimSST.
+
+
